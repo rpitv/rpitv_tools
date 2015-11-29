@@ -1,0 +1,76 @@
+#!/bin/bash
+# The contents of this file are hereby dedicated to the public domain.
+# Andrew H. Armenia
+# 2015-11-28
+
+FILENAME=""
+RECORD=1
+RECORD_PATH="/mnt/video1-volume1/LiveStreamRecord"
+
+STREAM_ROOT="rtmp://video1.rpitv.org:1935/liveorigin"
+TARGET_STREAM_ROOT="rtmp://a.rtmp.youtube.com/live2"
+
+usage() {
+	echo <<EOF
+usage: youtube_live [-r] origin_stream_name youtube_stream_name
+	-r: enable recording of stream
+EOF
+}
+
+record_setup() {
+	FILENAME="${RECORD_PATH}/${PRODUCTION}.ts"
+	SERIAL=0
+
+	while [ -e "${FILENAME}" ]; do
+		SERIAL=$((SERIAL+1))
+		FILENAME="${RECORD_PATH}/${PRODUCTION}_${SERIAL}.ts"
+	done
+
+	echo $FILENAME
+}
+
+while getopts ":r" opt; do
+	case $opt in
+		r)
+			RECORD=1
+			;;
+		\?)
+			echo "unknown command line option"
+			exit 1
+			;;
+	esac
+done
+
+shift $((OPTIND-1))
+PRODUCTION=$1
+TARGET_STREAM_NAME=$2
+
+[ $RECORD -ne 0 ] && record_setup
+
+echo "* We are going to pull $PRODUCTION from $STREAM_ROOT"
+echo "and send it to stream $TARGET_STREAM_NAME at $TARGET_STREAM_ROOT."
+echo
+if [ ! -z "$FILENAME" ]; then
+	echo "* We are also going to RECORD this production to $FILENAME."
+else
+	echo "* We are NOT GOING TO RECORD this production here."
+fi
+
+echo
+
+echo "If this is OK, then press Enter to continue."
+echo "If not, press Ctrl+C and check your command line options."
+read dummy
+
+ORIGIN_STREAM="${STREAM_ROOT}/${PRODUCTION}"
+TARGET_STREAM="${TARGET_STREAM_ROOT}/${TARGET_STREAM_NAME}"
+
+if [ ! -z "$FILENAME" ]; then
+	exec ffmpeg -i "$ORIGIN_STREAM" \
+	  -vcodec copy -acodec copy -f flv "$TARGET_STREAM" \
+	  -vcodec copy -bsf:v h264_mp4toannexb -acodec copy -f mpegts "$FILENAME"
+else
+	exec ffmpeg -i "$ORIGIN_STREAM" \
+	  -vcodec copy -acodec copy -f flv "$TARGET_STREAM"
+fi
+

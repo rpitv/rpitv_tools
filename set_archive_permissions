@@ -1,0 +1,108 @@
+#!/usr/bin/env ruby
+# The contents of this file are hereby dedicated to the public domain.
+# Andrew H. Armenia
+# 2015-11-28
+
+require 'find'
+require 'time'
+require 'json'
+require 'fileutils'
+
+# Where to look for files
+TARGET_PATH='/mnt/video1-volume1/Archive'
+
+# Where to store the list of files we've seen
+CATALOG_FILE='/mnt/video1-volume1/Archive/archive-catalog'
+
+# 48 hour grace period before we mess with anything
+GRACE_PERIOD=5*86400
+#GRACE_PERIOD=30
+
+# Files to exclude (by basename)
+EXCLUDES = ["tape-list", "tape-list.bak", "archive-catalog", "s*.1", "*.xmp"]
+
+# Find the desired uid and gid.
+DESIRED_UID = Etc.getpwnam("rpitv-sys").uid;
+DESIRED_GID = Etc.getgrnam("rpitv").gid;
+
+puts DESIRED_UID
+puts DESIRED_GID
+
+# load the list of all files we know about and when they were first seen
+begin
+	catalog = JSON.parse IO.read CATALOG_FILE
+rescue
+	puts "warning: catalog file couldn't be read, starting anew"
+	catalog = { }
+end
+
+def process_file(path)
+	puts "traversing file #{path}"
+	stat = File.stat(path)
+
+	# The if statements here are necessary so we don't change the file
+	# if it doesn't need to be changed. This will avoid tar throwing
+	# errors like "file changed while we read it".
+
+	# if owner is not rpitv-sys:rpitv, chown it
+	if stat.uid != DESIRED_UID || stat.gid != DESIRED_GID
+		FileUtils.chown(DESIRED_UID, DESIRED_GID, path)
+	end		
+
+	# if mode is not 444, change
+	if stat.mode != 0444
+		FileUtils.chmod 0444, path
+	end
+end
+
+# phase 1: go through all the files that exist, 
+# making a note if they've newly appeared
+Find.find('/mnt/video1-volume1/Archive') do |path|
+	bn = File.basename(path)
+
+	# skip it if it's a directory
+	if File.directory?(path)
+		next
+	end
+
+	# skip it if it's in the excludes list
+	if EXCLUDES.any?{ |exclude| File.fnmatch(exclude, bn) }
+		next
+	end
+
+	# if file is not in the catalog, add it
+	catalog[path] ||= Time.now.asctime
+
+	# if file was deleted, replace "deleted" with the current time
+	if catalog[path] == "deleted"
+		catalog[path] = Time.now.asctime
+	end
+
+	# check if file just appeared within the last 48 hours
+	first_noticed_time = Time.parse(catalog[path])
+	if Time.now - first_noticed_time > GRACE_PERIOD
+		process_file(path)
+	end
+end
+
+# phase 2: find any files in the catalog that have been deleted
+# this allows us to detect if things disappear and also to restart
+# the grace period if/when they reappear
+catalog.each_key do |file|
+	if not File.exists?(file)
+		puts "warning: #{file} appears to have been deleted!"
+		catalog[file] = "deleted"	
+	end
+end
+
+# write the new catalog file
+begin
+	# write to a new file
+	IO.write CATALOG_FILE + ".new", catalog.to_json
+	
+	# this should atomically overwrite the old with the new
+	FileUtils.mv(CATALOG_FILE + ".new", CATALOG_FILE)
+rescue
+	STDERR.puts "failed to write new catalog file!"
+end
+

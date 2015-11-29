@@ -1,0 +1,364 @@
+#!/usr/bin/env ruby
+# The contents of this file are hereby dedicated to the public domain.
+# Andrew H. Armenia
+# 2015-11-28
+
+require 'digest/sha1'
+
+SIZE_SUFFIXES = ["bytes", "KiB", "MiB", "GiB", "TiB"]
+EXCLUDES = [ "*.xmp", "archive-catalog" ]
+
+def format_size(sz)
+	divides = 0
+	while sz >= 1024.0 && divides < SIZE_SUFFIXES.size - 1
+		sz /= 1024.0
+		divides += 1
+	end
+
+	"%.2f %s" % [sz, SIZE_SUFFIXES[divides]]
+end
+
+class FileStats < Struct.new(:filename, :sha1, :mtime, :size)
+end
+
+class VolumeList < Hash
+	def initialize
+		super
+		@tapelist_filename = 'tape-list'
+		@diff_mode = :name_only
+
+		if File.exists?(@tapelist_filename)
+			read_file
+		else
+			STDERR.puts <<EOF
+There is currently no tape list file in this directory.
+If you're sure you're working in the right directory, and no tapes have 
+been made from it yet, run 'touch #{@tapelist_filename}' to create a 
+new, empty tape list file.
+EOF
+			fail "no tape list found"
+		end
+	end	
+
+	# load and save volume list from file
+	def read_file
+		clear
+		tape_id = nil
+		
+		IO.readlines(@tapelist_filename).each do |line|
+			if (line =~ /^TAPE (.*)$/)
+				# start new tape
+				tape_id=$1
+			else
+				sha1 = nil
+				mtime = nil
+				size = nil
+
+				# parse extended file data out of line
+				if (line =~ /sha1:([0-9a-fA-F]{40})/)
+					line = $` + $'
+					sha1 = $1
+				end
+
+				if (line =~ /mtime:(\d+)/)
+					line = $` + $'
+					mtime = Time.at($1.to_i)
+				end
+
+				if (line =~ /size:(\d+)/)
+					line = $` + $'
+					size = $1.to_i
+				end
+
+				if (line =~ /^\s(.*)$/)
+					# add this to the file list for this tape
+					self[tape_id] ||= []
+
+					data = FileStats.new
+					data.filename = $1.strip
+					data.mtime = mtime
+					data.sha1 = sha1
+					data.size = size
+
+					self[tape_id] << data
+				else
+					fail "corrupt tape list"
+				end
+			end
+		end
+	end
+
+	def write_file
+		File.rename(@tapelist_filename, @tapelist_filename + ".bak")
+		File.open(@tapelist_filename, 'w') do |tapelist|
+			each_pair do |tape, files|
+				tapelist.puts "TAPE #{tape}"
+				files.sort_by{ |fs| fs.filename }.each do |fs|
+					tapelist.write "  #{fs.filename.strip}"
+					if fs.sha1
+						tapelist.write " sha1:#{fs.sha1}"
+					end
+					if fs.mtime
+						tapelist.write " mtime:#{fs.mtime.to_i}"
+					end
+					if fs.size
+						tapelist.write " size:#{fs.size}"
+					end
+					tapelist.write "\n"
+				end
+			end
+		end
+	end
+
+	def tape_exists?(tape)
+		has_key?(tape)
+	end
+	
+	def check_mtime
+		@diff_mode = :mtime
+	end
+
+	def check_sha1
+		@diff_mode = :sha1
+	end
+
+	def archived_files
+		if @diff_mode == :name_only
+			# this works if we only care about filenames
+			values.flatten
+		elsif @diff_mode == :mtime	
+			# if we care about mtimes, then we need to reject 
+			# files where the mtime on disk is different from 
+			# the mtime in the tape list
+			values.flatten.select do |f|
+				if f.mtime.nil?
+					# assume files with unknown mtime have 
+					# not been backed up yet
+					false
+				elsif File.exists?(f.filename)
+					# ruby seems to do something dumb here, 
+					# so convert the timestamps to integers first
+					f.mtime.to_i == File.mtime(f.filename).to_i
+				else
+					false # file is not archived if it does not exist
+				end
+			end
+		elsif @diff_mode == :sha1
+			# if we care about sha1s, then we must reject files 
+			# where the sha1 of the file on disk is different 
+			# from the sha1 in the tape list.
+			values.flatten.select do |f|
+				if f.sha1.nil?
+					# assume files with unknown sha1 
+					# have not been backed up yet
+					false
+				elsif File.exists?(f.filename)
+					f.sha1 == Digest::SHA1.file(f.filename).hexdigest
+				else
+					false
+				end
+			end
+		else
+			fail "don't recognize that diff mode, bailing out"
+		end
+	end
+
+	def archived_files_names
+		archived_files.map { |f| f.filename }
+	end
+
+	def unarchived_files
+		dir_files - archived_files_names
+	end
+
+	def excluded(fn)
+		bn = File.basename(fn)
+
+		if fn == @tapelist_filename
+			true
+		elsif fn == @tapelist_filename + '.bak'
+			true
+		elsif EXCLUDES.any? { |exclude| File.fnmatch(exclude, bn) }
+			true
+		else
+			false
+		end
+	end
+
+	def dir_files
+		Dir.new(".").select do |fn|
+			File.file?(fn) && !excluded(fn)
+		end.sort
+	end
+
+	def next_tapeid
+		if self.size == 0
+			"TAPE_000"
+		else
+			self.keys.sort.last.succ
+		end
+	end
+
+	# check the files to determine if they may have been modified
+	def check_files(files)
+		ok = true
+
+		files.each do |fs|
+			puts "checking: #{fs.filename}"
+			current_mtime = File.mtime(fs.filename)
+			current_sha1 = Digest::SHA1.file(fs.filename).hexdigest
+
+			if current_mtime != fs.mtime or current_sha1 != fs.sha1
+				ok = false
+				break
+			end
+		end
+
+		ok
+	end
+
+	# add extended data (hash, mtime) for files that don't have it
+	def upgrade
+		each_pair do |tape, files|
+			files.each do |file|
+				if not File.exists?(file.filename)
+					puts "warning: #{file.filename} no longer exists, cannot hash"
+					next
+				end
+
+				if file.sha1.nil?
+					file.sha1 = Digest::SHA1.file(file.filename).hexdigest
+				end
+
+				if file.mtime.nil?
+					file.mtime = File.mtime(file.filename)
+				end
+
+				if file.size.nil?
+					file.size = File.size(file.filename)
+				end
+
+				p file
+				write_file # so we don't lose all hashing work if interrupted
+			end
+		end
+	end
+
+	# add a tape to the tape list and return the list of files that
+	# should go on the tape. This list of files is returned so that
+	# the actual process of writing the files to tape may be initiated
+	def mktape(tape_id, tape_size, opts = {})
+		fail if tape_exists?(tape_id)
+
+		files = []
+		tape_remaining = tape_size
+		unarchived_files.each do |f|
+			# don't grab anything but size just yet
+			fs = FileStats.new
+			fs.size = File.size(f)
+			fs.filename = f
+
+			if (fs.size > tape_size)
+				STDERR.puts "warning: file #{f} too large for single tape, skipping"
+			elsif (fs.size < tape_remaining)
+				fs.mtime = File.mtime(f)
+				if opts[:hash] or @diff_mode == :sha1
+					# compute hash of the file
+					fs.sha1 = Digest::SHA1.file(f).hexdigest
+				end
+				files << fs
+				tape_remaining = tape_remaining - fs.size
+				gb = format "%.2f", tape_remaining/1000000000.0
+				STDERR.puts "added #{f} to file list, #{gb} GB left"
+			end
+		end
+
+		if files.length > 0
+			self[tape_id] = files
+			puts("remaining tape: #{format_size(tape_remaining)}")
+		end
+
+		files
+	end
+end
+
+
+# this is set to 399GB for LTO3 tapes so we don't go over
+TAPE_SIZE = 799*1000*1000*1000
+TAPE_DEVICE = '/dev/st0'
+
+def mktape(tapeid, check_mtime, check_hash)
+	unless tapeid =~ /^[A-Za-z0-9_]+$/
+		fail "invalid tape id specified on command line"
+	end
+
+	vl = VolumeList.new
+	if vl.tape_exists?(tapeid)
+		fail "that tape ID is already in use"
+	end
+
+	if (check_hash)
+		vl.check_sha1
+	elsif (check_mtime)
+		vl.check_mtime
+	end
+
+	files = vl.mktape(tapeid, TAPE_SIZE, :hash => true)
+	if files.size == 0
+		fail "there are no files to be written to tape"
+	end
+
+	# we get a list of FileStats structures, turn it into a list of filenames
+	filenames = files.map { |f| f.filename }
+
+	begin
+		STDERR.puts "writing tape..."
+		system('tar', '--rsh-command=/usr/bin/ssh', '-b', '1024', '-cvf', TAPE_DEVICE, *filenames) or fail "write failed with status #{$?}"
+		STDERR.puts "verifying tape..."
+		system('tar', '--rsh-command=/usr/bin/ssh', '-b', '1024', '-dvf', TAPE_DEVICE, *filenames) or fail "verify failed with status #{$?}"
+		vl.check_files(files) or fail "files changed while we were writing them"
+		vl.write_file
+	rescue RuntimeError => e
+		STDERR.puts "failed to write tape #{tapeid}: #{e.message}"
+	end
+
+	# eject the tape
+	system('mt', '--rsh-command=/usr/bin/ssh', '-f', TAPE_DEVICE, 'offline')
+end
+
+def report_status
+	vl = VolumeList.new
+	vl.check_mtime
+	n_tapes = 0
+
+	loop do
+		tapeid = vl.next_tapeid
+		files = vl.mktape(vl.next_tapeid, TAPE_SIZE)
+		if files.size > 0
+			puts tapeid
+			files.each do |fs|
+				puts "\t#{fs.filename}"
+			end
+		else
+			break
+		end
+	end
+end
+
+check_mtime = ARGV.delete('-t')
+check_hash = ARGV.delete('-h')
+no_act = ARGV.delete('-n')
+upgrade = ARGV.delete('-u')
+
+if (upgrade)
+	puts "upgrading tape list, this may take a very long time"
+	vl = VolumeList.new
+	vl.upgrade
+elsif (no_act)
+	report_status
+else
+	tapeid = ARGV[0]
+	mktape(tapeid, check_mtime, check_hash)
+end
+
+
