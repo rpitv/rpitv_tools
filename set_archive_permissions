@@ -9,10 +9,10 @@ require 'json'
 require 'fileutils'
 
 # Where to look for files
-TARGET_PATH='/mnt/video1-volume1/Archive'
+TARGET_PATH='/mnt/rpitv-btrfs01/Archive'
 
 # Where to store the list of files we've seen
-CATALOG_FILE='/mnt/video1-volume1/Archive/archive-catalog'
+CATALOG_FILE='/mnt/rpitv-btrfs01/Archive/archive-catalog'
 
 # 48 hour grace period before we mess with anything
 GRACE_PERIOD=5*86400
@@ -57,7 +57,7 @@ end
 
 # phase 1: go through all the files that exist, 
 # making a note if they've newly appeared
-Find.find('/mnt/video1-volume1/Archive') do |path|
+Find.find(TARGET_PATH) do |path|
 	bn = File.basename(path)
 
 	# skip it if it's a directory
