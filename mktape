@@ -269,7 +269,6 @@ EOF
 				files << fs
 				tape_remaining = tape_remaining - fs.size
 				gb = format "%.2f", tape_remaining/1000000000.0
-				STDERR.puts "added #{f} to file list, #{gb} GB left"
 			end
 		end
 
