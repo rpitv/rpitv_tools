@@ -280,6 +280,22 @@ EOF
 
 		files
 	end
+
+
+	# Find the most recent tape containing a file with the given name.
+	def find_tape_for_file(filename)
+		tapes = self.keys.sort.reverse!
+		tapes.each do |tape_id|
+			tape_files = self[tape_id]
+			tape_files.each do |file_stats|
+				if file_stats.filename == filename
+					return tape_id
+				end
+			end
+		end
+
+		nil
+	end
 end
 
 
@@ -349,6 +365,7 @@ check_mtime = ARGV.delete('-t')
 check_hash = ARGV.delete('-h')
 no_act = ARGV.delete('-n')
 upgrade = ARGV.delete('-u')
+find_tapes = ARGV.delete('-f')
 
 if (upgrade)
 	puts "upgrading tape list, this may take a very long time"
@@ -356,6 +373,17 @@ if (upgrade)
 	vl.upgrade
 elsif (no_act)
 	report_status
+elsif (find_tapes)
+	# mktape -f file [file] [file]
+	# loads the tape list from the current working directory and finds the 
+	# tapes containing the given files.
+	# prints a list of lines in the format: 
+	# TAPE FILE
+	vl = VolumeList.new
+	ARGV.each do |file|
+		tape = vl.find_tape_for_file(file)
+		puts "#{tape} #{file}"
+	end
 else
 	tapeid = ARGV[0]
 	mktape(tapeid, check_mtime, check_hash)
