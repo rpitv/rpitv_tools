@@ -361,16 +361,26 @@ def report_status
 	end
 end
 
+def list_archived
+	puts "FILES"
+	vl = VolumeList.new
+	vl.check_mtime
+	vl.archived_files_names.each { |f| puts f }
+end
+
 check_mtime = ARGV.delete('-t')
 check_hash = ARGV.delete('-h')
 no_act = ARGV.delete('-n')
 upgrade = ARGV.delete('-u')
 find_tapes = ARGV.delete('-f')
+ls = ARGV.delete('-l')
 
 if (upgrade)
 	puts "upgrading tape list, this may take a very long time"
 	vl = VolumeList.new
 	vl.upgrade
+elsif (ls)
+	list_archived
 elsif (no_act)
 	report_status
 elsif (find_tapes)
