@@ -352,7 +352,7 @@ def report_status
 		if files.size > 0
 			puts tapeid
 			files.each do |fs|
-				puts "\t#{fs.filename}"
+				puts "\t#{fs.filename} #{format_size(fs.size)}"
 			end
 		else
 			break
@@ -396,5 +396,3 @@ else
 	tapeid = ARGV[0]
 	mktape(tapeid, check_hash)
 end
-
-
