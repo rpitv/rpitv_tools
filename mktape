@@ -302,7 +302,7 @@ end
 TAPE_SIZE = 799*1000*1000*1000
 TAPE_DEVICE = '/dev/st0'
 
-def mktape(tapeid, check_mtime, check_hash)
+def mktape(tapeid, check_hash)
 	unless tapeid =~ /^[A-Za-z0-9_]+$/
 		fail "invalid tape id specified on command line"
 	end
@@ -314,7 +314,7 @@ def mktape(tapeid, check_mtime, check_hash)
 
 	if (check_hash)
 		vl.check_sha1
-	elsif (check_mtime)
+	else 
 		vl.check_mtime
 	end
 
@@ -367,7 +367,6 @@ def list_archived
 	vl.archived_files_names.each { |f| puts f }
 end
 
-check_mtime = ARGV.delete('-t')
 check_hash = ARGV.delete('-h')
 no_act = ARGV.delete('-n')
 upgrade = ARGV.delete('-u')
@@ -395,7 +394,7 @@ elsif (find_tapes)
 	end
 else
 	tapeid = ARGV[0]
-	mktape(tapeid, check_mtime, check_hash)
+	mktape(tapeid, check_hash)
 end
 
 
