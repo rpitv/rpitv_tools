@@ -247,7 +247,7 @@ EOF
 	# add a tape to the tape list and return the list of files that
 	# should go on the tape. This list of files is returned so that
 	# the actual process of writing the files to tape may be initiated
-	def mktape(tape_id, tape_size, opts = {})
+	def mktape(tape_id, tape_size, opts = {}, new_file_delay)
 		fail if tape_exists?(tape_id)
 
 		files = []
@@ -260,6 +260,8 @@ EOF
 
 			if (fs.size > tape_size)
 				STDERR.puts "warning: file #{f} too large for single tape, skipping"
+			elsif (Time.now.to_i - File.mtime(f).to_i < new_file_delay.to_r * 3600)
+				STDERR.puts "warning: file #{f} has a modified time less than #{new_file_delay} hours ago, skipping"
 			elsif (fs.size < tape_remaining)
 				fs.mtime = File.mtime(f)
 				if opts[:hash] or @diff_mode == :sha1
@@ -302,7 +304,7 @@ end
 TAPE_SIZE = 799*1000*1000*1000
 TAPE_DEVICE = '/dev/st0'
 
-def mktape(tapeid, check_hash)
+def mktape(tapeid, check_hash, new_file_delay)
 	unless tapeid =~ /^[A-Za-z0-9_]+$/
 		fail "invalid tape id specified on command line"
 	end
@@ -318,7 +320,7 @@ def mktape(tapeid, check_hash)
 		vl.check_mtime
 	end
 
-	files = vl.mktape(tapeid, TAPE_SIZE, :hash => true)
+	files = vl.mktape(tapeid, TAPE_SIZE, :hash => true, new_file_delay => new_file_delay)
 	if files.size == 0
 		fail "there are no files to be written to tape"
 	end
@@ -341,14 +343,14 @@ def mktape(tapeid, check_hash)
 	system('mt', '--rsh-command=/usr/bin/ssh', '-f', TAPE_DEVICE, 'offline')
 end
 
-def report_status
+def report_status(new_file_delay)
 	vl = VolumeList.new
 	vl.check_mtime
 	n_tapes = 0
 
 	loop do
 		tapeid = vl.next_tapeid
-		files = vl.mktape(vl.next_tapeid, TAPE_SIZE)
+		files = vl.mktape(vl.next_tapeid, TAPE_SIZE, new_file_delay)
 		if files.size > 0
 			puts tapeid
 			files.each do |fs|
@@ -372,6 +374,13 @@ no_act = ARGV.delete('-n')
 upgrade = ARGV.delete('-u')
 find_tapes = ARGV.delete('-f')
 ls = ARGV.delete('-l')
+new_file_delay = ARGV.delete('-t')
+
+if (new_file_delay == '-t')
+	new_file_delay = ARGV.shift
+else
+	new_file_delay = 0
+end
 
 if (upgrade)
 	puts "upgrading tape list, this may take a very long time"
@@ -380,7 +389,7 @@ if (upgrade)
 elsif (ls)
 	list_archived
 elsif (no_act)
-	report_status
+	report_status(new_file_delay)
 elsif (find_tapes)
 	# mktape -f file [file] [file]
 	# loads the tape list from the current working directory and finds the 
@@ -394,5 +403,5 @@ elsif (find_tapes)
 	end
 else
 	tapeid = ARGV[0]
-	mktape(tapeid, check_hash)
+	mktape(tapeid, check_hash, new_file_delay)
 end
