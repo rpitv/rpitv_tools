@@ -4,6 +4,7 @@
 # 2015-11-28
 
 require 'digest/sha1'
+require 'etc'
 
 SIZE_SUFFIXES = ["bytes", "KiB", "MiB", "GiB", "TiB"]
 EXCLUDES = [ "*.xmp", "archive-catalog" ]
@@ -348,13 +349,24 @@ def report_status(new_file_delay)
 	vl.check_mtime
 	n_tapes = 0
 
+	desired_uid = Etc.getpwnam("rpitv-sys").uid
+
 	loop do
 		tapeid = vl.next_tapeid
 		files = vl.mktape(vl.next_tapeid, TAPE_SIZE, new_file_delay)
 		if files.size > 0
 			puts tapeid
 			files.each do |fs|
+<<<<<<< HEAD
 				puts "\t#{fs.filename} #{format_size(fs.size)}"
+=======
+				s = File.stat(fs.filename)
+				if s.uid != desired_uid
+					puts "\t(!)#{fs.filename}"
+				else
+					puts "\t#{fs.filename}"
+				end
+>>>>>>> refs/remotes/origin/master
 			end
 		else
 			break

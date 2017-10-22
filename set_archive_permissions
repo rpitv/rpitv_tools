@@ -9,10 +9,10 @@ require 'json'
 require 'fileutils'
 
 # Where to look for files
-TARGET_PATH='/mnt/rpitv-btrfs01/Archive'
+TARGET_PATH='/tv/ArchiveRecovery/NewArchive'
 
 # Where to store the list of files we've seen
-CATALOG_FILE='/mnt/rpitv-btrfs01/Archive/archive-catalog'
+CATALOG_FILE='/tv/ArchiveRecovery/NewArchive/archive-catalog'
 
 # 48 hour grace period before we mess with anything
 GRACE_PERIOD=5*86400
@@ -50,7 +50,7 @@ def process_file(path)
 	end		
 
 	# if mode is not 444, change
-	if stat.mode != 0444
+	if stat.mode & 0777 != 0444
 		FileUtils.chmod 0444, path
 	end
 end
