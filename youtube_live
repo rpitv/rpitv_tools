@@ -5,7 +5,7 @@
 
 FILENAME=""
 RECORD=1
-RECORD_PATH="/mnt/video1-volume1/LiveStreamRecord"
+RECORD_PATH="/tv/LiveStreamRecord"
 
 STREAM_ROOT="rtmp://video1.rpitv.org:1935/liveorigin"
 TARGET_STREAM_ROOT="rtmp://a.rtmp.youtube.com/live2"
