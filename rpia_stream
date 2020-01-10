@@ -1,0 +1,13 @@
+#!/bin/bash
+
+case "$2" in
+rtmp:*)
+	URL="$2"
+	;;
+*)
+	URL="rtmp://va.pscp.tv:80/x/$2"
+	;;
+esac
+
+exec ffmpeg -i "rtmp://video1.rpitv.org/liveorigin/$1" -f flv -c:v libx264 -g 180 -b:v 2500k -s 1280x720 -c:a aac -b:a 128k "$URL"
+
