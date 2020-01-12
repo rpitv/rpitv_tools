@@ -9,5 +9,5 @@ rtmp:*)
 	;;
 esac
 
-exec ffmpeg -i "rtmp://video1.rpitv.org/liveorigin/$1" -f flv -c:v libx264 -g 180 -b:v 2500k -s 1280x720 -c:a aac -b:a 128k "$URL"
+exec ffmpeg -f live_flv -i "rtmp://video1.rpitv.org/liveorigin/$1" -f flv -c:v libx264 -g 180 -b:v 2500k -s 1280x720 -c:a aac -b:a 128k "$URL"
 
